@@ -81,7 +81,7 @@ package_unpack()
 package_patch()
 {
   echo " => patching source..."
-  pkg_patches=`ls -1 ../*.patch 2> /dev/null`
+  pkg_patches=`ls -1 ../*.patch *.patch 2> /dev/null`
   for p in $pkg_patches; do
     if [ ! "X$p" = "X" ] && [ -f $p ]; then
       echo " => applying patches from $p"
@@ -122,7 +122,7 @@ package_download_git()
     else
       echo " == "`git log | head -n 1`
     fi
-    git submodule init && git submodule update
+    git submodule init && git submodule update --depth=1
     cd ..
     veval "tar -zcvf $pkg_git_file *"
     assertfile "$pkg_git_file"

@@ -51,6 +51,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   log-error log-system
   make-safe-thread
   u8vector->base64-string
+  system-directory system-pathseparator string-contains
 ))
 
 (define (string-split-sane a b) (if (or (not (string? a)) (= (string-length a) 0)) '("") (string-split a b)))
@@ -71,28 +72,35 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;; recursively load a website
 
 ;; scan and load directory recursively
-(define (website:scan-directory db path)
-  (if (file-exists? path)
-    (let* ((i (file-info path))
-           (t (file-info-type i)))
-     (cond
-       ((eq? t 'directory)
-         (website:log 2 "=> scanning " path "..")
-         (let loop ((fs (directory-files path)))
-           (if (fx= (length fs) 0) #f (begin
-             (website:scan-directory db (string-append path "/" (car fs)))
-             (loop (cdr fs))))))
-       ((eq? t 'regular)
-         (let ((trimpath (string-append "/" (string-mapconcat (cdr (string-split-sane (pregexp-replace* "//" path "/") #\/)) "/"))))
-           (website:log 2 "==> adding " path " [" trimpath "]..")
-           (table-set! db trimpath (website:compress (file->u8vector path)))
+(define (website:scan-directory db path0 . fullpath0)
+  (let* ((has-fullpath? (fx> (length fullpath0) 0))
+         (path (if (or has-fullpath? (string-contains path0 (system-pathseparator)))
+           path0
+           (string-append (system-directory) (system-pathseparator) path0)))
+         (fullpath (if has-fullpath? (car fullpath0) path)))
+    (if (file-exists? path)
+      (let* ((i (file-info path))
+             (t (file-info-type i)))
+       (cond
+         ((eq? t 'directory)
+           (website:log 2 "=> scanning " path "..")
+           (let loop ((fs (directory-files path)))
+             (if (fx= (length fs) 0) #f (begin
+               (website:scan-directory db (string-append path "/" (car fs)) fullpath)
+               (loop (cdr fs))))))
+         ((eq? t 'regular)
+           (let ((trimpath (string-append "/" (string-mapconcat (cdr (string-split-sane
+                   (pregexp-replace* fullpath (pregexp-replace* "//" path "/") "") #\/)) "/"))))
+             (website:log 2 "==> adding " path " [" trimpath "]..")
+             (table-set! db trimpath (website:compress (file->u8vector path)))
+           )
+         )
+         (else
+           (website:log 0 "** unsupported file type: " path "\n")
          )
        )
-       (else
-         (website:log 0 "** unsupported file type: " path "\n")
-       )
-     )
-  )))
+    ))
+  ))
 
 ;; ------------------
 ;; render the website
@@ -186,6 +194,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    (lambda ()
      (let* ((request (website:trim-string (website:safecall read-line port)))
             (headers  (website:read-header port))
+            (content (website:read-content port headers))
             (cgi-env (website:build-cgi-environment request headers)))
        (if (string? request)
          (let* ((r (string-split-sane request #\space))
@@ -193,9 +202,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
             (website:log 3 "website:serve request: " request)
             (website:log 3 "website:serve header: " headers)
             (website:log 3 "website:serve cgi env: " cgi-env)
+            (website:log 3 "website:serve content: " content)
             (if (or (string-ci=? m "GET") (string-ci=? m "POST"))
-              (website:servefile db port
-                (if (string=? (cadr r) "/") "/index.html" (cadr r)) cgi-env))
+              (begin
+                (if content (set! cgi-env (append cgi-env (list (list "CONTENT" content)))))
+                (website:servefile db port
+                  (if (string=? (cadr r) "/") "/index.html" (cadr r)) cgi-env)))
             (website:safecall force-output port)
             (website:safecall close-port port)
     ))))))
@@ -215,8 +227,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
                                 (if (procedure? zdata) "Cache-Control: no-cache, no-store\n" "")
                                 "Access-Control-Allow-Origin: *\n"
                               ;;  "Access-Control-Allow-Methods: GET,POST,PUT\n"
-                                "\n"))
-         (catchall (table-ref db 'catchall #f)))
+                                "\n")))
     (if data
       (begin
         (website:safecall display headers port)
@@ -242,6 +253,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;; ----------------
 
 (define website:db (make-table))
+(define (website-getdb) website:db)
 
 (define (website-serve db port) (thread-start! (make-safe-thread (lambda ()
   (current-exception-handler log:exception-handler)

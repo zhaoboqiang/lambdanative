@@ -124,4 +124,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     (fx- (length lst) (length (member element lst)))
     #f
   ))
+
+;; new list filled with n elements containing s, s+1, s+2, ... s+n-1
+(define (make-list-natural s n)
+  (if (zero? n)
+    '()
+    (cons s (make-list-natural (+ s 1) (- n 1)))
+  ))
+
 ;; eof
